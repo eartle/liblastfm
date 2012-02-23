@@ -26,9 +26,6 @@ mac {
     QMAKE_CXXFLAGS_RELEASE += -fvisibility-inlines-hidden -fvisibility=hidden
 }
 
-# look better to Linux folks :P
-linux:CONFIG += warn_off
-
 # used to determine if we should statically link the fingerprint library
 # used by lastfm-desktop and other projects
 CONFIG -= app_bundle
@@ -39,9 +36,12 @@ headers.path = _include/lastfm
 headers.files = src/*.h
 }
 else{
+    isEmpty( PREFIX ) {
+        PREFIX=/usr/local
+    }
 INSTALLS = target headers
-target.path = /usr/local/lib
-headers.path = /usr/local/include/lastfm
+target.path = $${PREFIX}/lib
+headers.path = $${PREFIX}/include/lastfm
 headers.files = src/*.h
 }
 
@@ -57,7 +57,7 @@ mac{
     LIBS += -framework CoreFoundation # various
 }
 
-linux*{
+unix:!mac{
     QT += dbus
 }
 
@@ -131,8 +131,8 @@ mac:SOURCES += 	src/mac/MNetworkConnectionMonitor_mac.cpp
 mac:HEADERS += src/mac/ProxyDict.h \
                src/mac/MNetworkConnectionMonitor.h
 
-linux*:SOURCES += src/linux/LNetworkConnectionMonitor_linux.cpp
-linux*:HEADERS += src/linux/LNetworkConnectionMonitor.h
+unix:!mac:SOURCES += src/linux/LNetworkConnectionMonitor_linux.cpp
+unix:!mac:HEADERS += src/linux/LNetworkConnectionMonitor.h
 
 !win32:VERSION = 0.4.0
 
