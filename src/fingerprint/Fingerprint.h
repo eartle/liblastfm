@@ -20,6 +20,8 @@
 #ifndef LASTFM_FINGERPRINT_H
 #define LASTFM_FINGERPRINT_H
 
+#include "global.h"
+
 #include "FingerprintId.h"
 
 namespace lastfm
@@ -92,6 +94,6 @@ namespace lastfm
 }
 
 
-QDebug operator<<( QDebug d, lastfm::Fingerprint::Error e );
+QDebug LASTFM_FINGERPRINT_DLLEXPORT operator<<( QDebug d, lastfm::Fingerprint::Error e );
 
 #endif
