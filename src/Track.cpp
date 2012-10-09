@@ -752,7 +752,7 @@ lastfm::Track::removeTag( const QString& tag ) const
     if (tag.isEmpty())
         return 0;
     QMap<QString, QString> map = params( "removeTag" );
-    map["tags"] = tag;
+    map["tag"] = tag;
     return ws::post(map);
 }
 
@@ -768,6 +768,7 @@ lastfm::Track::updateNowPlaying( int duration ) const
 {
     QMap<QString, QString> map = params("updateNowPlaying");
     map["duration"] = QString::number( duration );
+    map["albumArtist"] = d->albumArtist;
     if ( !album().isNull() ) map["album"] = album();
     map["context"] = extra("playerId");
 
