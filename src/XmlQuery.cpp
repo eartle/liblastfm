@@ -89,7 +89,8 @@ XmlQuery::parse( const QByteArray& bytes )
                 QDomElement error = d->e.firstChildElement( "error" );
                 uint const n = d->e.childNodes().count();
 
-                // no elements beyond the lfm is perfectably acceptable <-- wtf?
+                // no elements beyond the lfm is perfectably acceptable for example when
+                // XmlQuery is used parse response of a POST request.
                 // if (n == 0) // nothing useful in the response
                 if (status == "failed" || (n == 1 && !error.isNull()) )
                     d->error = error.isNull()
@@ -122,8 +123,16 @@ XmlQuery::parse( const QByteArray& bytes )
     return d->error.enumValue() == lastfm::ws::NoError;
 }
 
+bool
+XmlQuery::parse( QNetworkReply* reply )
+{
+    reply->deleteLater();
+    return parse( reply->readAll() ); 
+}
 
-lastfm::ws::ParseError XmlQuery::parseError() const
+
+lastfm::ws::ParseError
+XmlQuery::parseError() const
 {
     return d->error;
 }

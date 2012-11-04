@@ -32,6 +32,8 @@
 #include <QStringList>
 #include <fstream>
 
+#include "User.h"
+
 using lastfm::Track;
 
 static const uint k_bufferSize = 1024 * 8;
@@ -255,7 +257,8 @@ lastfm::Fingerprint::submit() const
     QFileInfo const fi( path );
 
     #define e( x ) QUrl::toPercentEncoding( x )
-    QUrl url( "http://www.last.fm/fingerprint/query/" );
+    QUrl url( "http://ws.audioscrobbler.com/fingerprint/query/" );
+    url.addEncodedQueryItem( "username", e(lastfm::User().name()) );
     url.addEncodedQueryItem( "artist", e(t.artist()) );
     url.addEncodedQueryItem( "album", e(t.album()) );
     url.addEncodedQueryItem( "track", e(t.title()) );
@@ -303,6 +306,7 @@ lastfm::Fingerprint::decode( QNetworkReply* reply, bool* complete_fingerprint_re
     // In the case of an error, there will be no initial number, just
     // an error string.
     
+    reply->deleteLater();
     QString const response( reply->readAll() );
     QStringList const list = response.split( ' ' );
 
@@ -360,4 +364,6 @@ QDebug operator<<( QDebug d, lastfm::Fingerprint::Error e )
         CASE(InternalError)
     }
     #undef CASE
+
+    return d;
 }
