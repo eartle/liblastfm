@@ -56,7 +56,7 @@ namespace lastfm
         void onTuneReturn();
         void onGetPlaylistReturn();
         void onXspfExpired();
-
+        void onGotLovedTracks();
 
     private:
         class RadioTunerPrivate * const d;

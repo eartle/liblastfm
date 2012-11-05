@@ -41,6 +41,7 @@ class lastfm::RadioTunerPrivate : public QObject
 {
     Q_OBJECT
     public:
+        QList<Track> m_lovedTracks;
         QList<Xspf*> m_playlistQueue;
         uint m_retry_counter;
         bool m_fetchingPlaylist;
@@ -155,11 +156,62 @@ RadioTuner::RadioTuner( const RadioStation& station )
     }
     else
     {
-        QMap<QString, QString> map;
-        map["method"] = "radio.tune";
-        map["station"] = station.url();
-        map["additional_info"] = "1";
-        connect( ws::post(map), SIGNAL(finished()), SLOT(onTuneReturn()) );
+        if ( station.url().startsWith( "lastfm://user/" ) && station.url().endsWith( "/loved" ) )
+        {
+            // this is loved tracks so fetch them all!
+
+            connect( User( "eartle" ).getLovedTracks(), SIGNAL(finished()), SLOT(onGotLovedTracks()));
+        }
+        else
+        {
+            QMap<QString, QString> map;
+            map["method"] = "radio.tune";
+            map["station"] = station.url();
+            map["additional_info"] = "1";
+            connect( ws::post(map), SIGNAL(finished()), SLOT(onTuneReturn()) );
+        }
+    }
+}
+
+void
+RadioTuner::onGotLovedTracks()
+{
+    XmlQuery lfm;
+
+    if ( lfm.parse( static_cast<QNetworkReply*>( sender() ) ) )
+    {
+        foreach( const XmlQuery& trackXml, lfm["lovedtracks"].children("track") )
+        {
+            MutableTrack track;
+            track.setTitle( trackXml["name"].text() );
+            track.setArtist( trackXml["artist"]["name"].text() );
+            //track.setMbid( Mbid( trackXml["mbid"].text() ) );
+            track.setLoved( true );
+            track.setUrl( QUrl( "http://www.spotify.com" ) );
+            track.setExtra( "streamSource", "Spotify" );
+
+            d->m_lovedTracks << track;
+        }
+
+        int page = lfm["lovedtracks"].attribute( "page" ).toInt();
+        int perPage = lfm["lovedtracks"].attribute( "perPage" ).toInt();
+        int totalPages = lfm["lovedtracks"].attribute( "totalPages" ).toInt();
+        QString user = lfm["lovedtracks"].attribute( "user" );
+        //int total = lfm["friends"].attribute( "total" ).toInt();
+
+        qDebug() << page;
+
+        // Check if we need to fetch another page of users
+        if ( page != totalPages )
+        {
+            connect( lastfm::User( user ).getLovedTracks( perPage, page + 1 ), SIGNAL(finished()), SLOT(onGotLovedTracks()) );
+        }
+        else
+        {
+            // we have fetched all the pages!
+            qsrand( QDateTime::currentDateTime().toTime_t() );
+            emit trackAvailable();
+        }
     }
 }
 
@@ -260,6 +312,14 @@ RadioTuner::onXspfExpired()
 Track
 RadioTuner::takeNextTrack()
 {
+    if ( d->m_lovedTracks.count() > 0 )
+    {
+        qDebug() << "Loved track!";
+        return d->m_lovedTracks.takeAt( qrand() % d->m_lovedTracks.count() );
+    }
+
+    qDebug() << "Not a loved track :(";
+
     if ( d->m_playlistQueue.isEmpty() )
     {
         // If there are no tracks here and we're not fetching tracks
