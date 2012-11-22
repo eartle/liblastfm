@@ -41,8 +41,8 @@ class lastfm::RadioTunerPrivate : public QObject
 {
     Q_OBJECT
     public:
-        QList<Track> m_lovedTracks;
-        QList<Xspf*> m_playlistQueue;
+        QList<Track> m_playlist;
+        QPointer<Xspf> m_xspf;
         uint m_retry_counter;
         bool m_fetchingPlaylist;
         bool m_requestedPlaylist;
@@ -110,7 +110,7 @@ RadioTunerPrivate::fetchFiveMoreTracks()
         QNetworkReply* reply = ws::post(map);
         connect( reply, SIGNAL(finished()), parent(), SLOT(onTuneReturn()) );
 
-        m_retuneStation = RadioStation();
+        //m_retuneStation = RadioStation();
         m_twoSecondTimer->stop();
     }
     else
@@ -160,7 +160,13 @@ RadioTuner::RadioTuner( const RadioStation& station )
         {
             // this is loved tracks so fetch them all!
 
-            connect( User( "eartle" ).getLovedTracks(), SIGNAL(finished()), SLOT(onGotLovedTracks()));
+            int endPos = station.url().indexOf( "/", 14 );
+            if ( endPos == -1 )
+                endPos = station.url().length();
+
+            QString username = station.url().mid( 14, endPos - 14 );
+
+            connect( User( username ).getLovedTracks( 100, 1 ), SIGNAL(finished()), SLOT(onGotLovedTracks()));
         }
         else
         {
@@ -189,8 +195,9 @@ RadioTuner::onGotLovedTracks()
             track.setLoved( true );
             track.setUrl( QUrl( "http://www.spotify.com" ) );
             track.setExtra( "streamSource", "Spotify" );
+            track.setExtra( "spotifyId", "unknown" );
 
-            d->m_lovedTracks << track;
+            d->m_playlist << track;
         }
 
         int page = lfm["lovedtracks"].attribute( "page" ).toInt();
@@ -209,7 +216,15 @@ RadioTuner::onGotLovedTracks()
         else
         {
             // we have fetched all the pages!
+            // SHUFFLE!
+            QList<Track> lovedTracks = d->m_playlist;
+            d->m_playlist.clear();
+
             qsrand( QDateTime::currentDateTime().toTime_t() );
+
+            while ( lovedTracks.count() > 0 )
+                d->m_playlist << lovedTracks.takeAt( qrand() % lovedTracks.count() );
+
             emit trackAvailable();
         }
     }
@@ -222,7 +237,7 @@ RadioTuner::~RadioTuner()
 void
 RadioTuner::retune( const RadioStation& station )
 {
-    d->m_playlistQueue.clear();
+    d->m_playlist.clear();
     d->m_retuneStation = station;
 
     qDebug() << station.url();
@@ -233,7 +248,10 @@ void
 RadioTuner::onTuneReturn()
 {
     if ( !d->m_retuneStation.url().isEmpty() )
+    {
         d->m_station = d->m_retuneStation;
+        d->m_retuneStation = RadioStation();
+    }
 
     XmlQuery lfm;
 
@@ -279,7 +297,6 @@ RadioTuner::onGetPlaylistReturn()
         emit title( lfm["playlist"]["title"].text() );
 
         Xspf* xspf = new Xspf( lfm["playlist"], this );
-        connect( xspf, SIGNAL(expired()), SLOT(onXspfExpired()) );
 
         if ( xspf->isEmpty() )
         {
@@ -290,8 +307,9 @@ RadioTuner::onGetPlaylistReturn()
         else
         {
             d->m_retry_counter = 0;
-            d->m_playlistQueue << xspf;
-            emit trackAvailable();
+            // get the spotify uris for this playlist
+            d->m_xspf = xspf;
+            connect( Track::playlinks( d->m_xspf->tracks() ), SIGNAL(finished()), SLOT(onGotPlaylinks()));
         }
     }
     else
@@ -302,43 +320,62 @@ RadioTuner::onGetPlaylistReturn()
 }
 
 void
-RadioTuner::onXspfExpired()
+RadioTuner::onGotPlaylinks()
 {
-    int index = d->m_playlistQueue.indexOf( static_cast<Xspf*>(sender()) );
-    if ( index != -1 )
-        d->m_playlistQueue.takeAt( index )->deleteLater();
+    lastfm::XmlQuery lfm;
+
+    // get the spotify ids from the xml
+    if ( lfm.parse( static_cast<QNetworkReply*>( sender() ) ) )
+    {
+        for ( int i = 0 ; i < d->m_xspf->tracks().count() ; i++ )
+        {
+            QString spotifyId = lfm["spotify"].children("track")[i]["externalids"]["spotify"].text();
+
+            if ( !spotifyId.isEmpty() )
+            {
+                MutableTrack( d->m_xspf->tracks()[i] ).setExtra( "spotifyId", spotifyId );
+            }
+        }
+    }
+
+    // add all the xspf tracks to the playlist
+    while ( !d->m_xspf->isEmpty() )
+        d->m_playlist << d->m_xspf->takeFirst();
+
+    d->m_xspf->deleteLater();
+
+    emit trackAvailable();
+}
+
+void
+RadioTuner::queueTrack( lastfm::Track& track )
+{
+    d->m_playlist.insert( 0, track );
+}
+
+bool
+trackExpired( const Track& track )
+{
+    return (!track.extra( "expiry" ).isEmpty()) && QDateTime::currentDateTime() > QDateTime::fromTime_t( track.extra( "expiry" ).toInt() );
 }
 
 Track
 RadioTuner::takeNextTrack()
 {
-    if ( d->m_lovedTracks.count() > 0 )
+    if ( !d->m_playlist.isEmpty() )
     {
-        qDebug() << "Loved track!";
-        return d->m_lovedTracks.takeAt( qrand() % d->m_lovedTracks.count() );
+        Track track = d->m_playlist.takeFirst();
+
+        while ( trackExpired( track ) && !d->m_playlist.isEmpty() )
+            track = d->m_playlist.takeFirst();
+
+        if ( !trackExpired( track ) )
+            return track;
     }
-
-    qDebug() << "Not a loved track :(";
-
-    if ( d->m_playlistQueue.isEmpty() )
-    {
-        // If there are no tracks here and we're not fetching tracks
-        // it's probably because the playlist expired so fetch more now
-        if ( !d->m_fetchingPlaylist )
-            d->fetchFiveMoreTracks();
-
-        return Track();
-    }
-
-    Track result = d->m_playlistQueue[0]->takeFirst();
-
-    if ( d->m_playlistQueue[0]->isEmpty() )
-        d->m_playlistQueue.removeFirst();
-
-    if ( d->m_playlistQueue.isEmpty() )
+    else if ( !d->m_fetchingPlaylist )
         d->fetchFiveMoreTracks();
 
-    return result;
+    return Track();
 }
 
 #include "RadioTuner.moc"
